@@ -36,6 +36,8 @@ sudo ip netns exec wan ip address add 203.0.113.1/24 dev wan-veth0
 # デフォルトルートを設定
 sudo ip netns exec wan ip route add default via 203.0.113.254
 
+# Source NATの挙動を観察する
+
 # iptablesでnatを設定する
 ## 現在のiptablesの設定を確認する
 sudo ip netns exec router iptables -t nat -L
@@ -56,3 +58,29 @@ sudo ip netns exec lan ping -c 5 203.0.113.1
 ## 別画面でtcpdump
 sudo ip netns exec lan tcpdump -tnl -i ns2-veth0 icmp
 sudo ip netns exec wan tcpdump -tnl -i wan-veth0 icmp
+
+# Destination NATの挙動を観察する
+
+## natのルール追加
+## -A PREROUTING 処理を追加するチェインを指定。PREROUTINGはインターフェースからパケットが入ってきた直後を表している。
+## -p 処理対象のトランスポート層のプロトコル
+## --dport 処理対象のポート番号
+## -d 書き換える前の送信先IPアドレス
+## -j DNAT 条件に一致したルールを指定。DNATはターゲットがDestination NATであることを示している
+## --to-destination 書き換えた後の送信先IPアドレス
+sudo ip netns exec router iptables -t nat \
+-A PREROUTING \
+-p tcp \
+--dport 54321 \
+-d 203.0.113.254 \
+-j DNAT \
+--to-destination 192.0.2.1
+
+# lan側で、TCPの54321portを待ち受けるサーバーを起動
+sudo ip netns exec lan nc -lnv 54321
+# wan側のnetnsから、サーバーに接続する
+# 接続先は、routerのグローバルIP
+sudo ip netns exec wan nc 203.0.113.254 54321
+
+# lan側のインターフェースをキャプチャしてみる
+sudo ip netns exec lan tcpdump -tnl -i lan-veth0 "tcp and port 54321"
